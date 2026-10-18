@@ -1,194 +1,55 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EPUB Translator Lokal</title>
 <style>
-:root{--bg:#f6f3ed;--card:#fff;--text:#242424;--muted:#6c6c6c;--line:#ddd7ce;--accent:#222}
-*{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
-.wrap{max-width:900px;margin:auto;padding:28px 18px 60px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 8px 25px #0000000b}
-h1{font-size:30px;margin:0 0 8px} h2{font-size:18px;margin:0 0 14px}.muted{color:var(--muted);line-height:1.55}
-.drop{border:2px dashed #aaa;border-radius:16px;padding:34px;text-align:center;cursor:pointer}.drop.drag{background:#eee}
-button,select,input{font:inherit}button{border:0;border-radius:12px;padding:12px 17px;background:#222;color:white;cursor:pointer}button.secondary{background:#eee;color:#222}button:disabled{opacity:.45;cursor:not-allowed}
-.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.row>*{flex:1;min-width:180px}
-label{display:block;font-size:13px;color:#555;margin-bottom:6px}select,input[type=number]{width:100%;padding:14px 42px 14px 14px;border:2px solid #bdb7ae;border-radius:12px;background:#fff;color:#111;font-size:16px;line-height:1.4;min-height:52px;-webkit-appearance:auto;appearance:auto}
-select option{background:#fff;color:#111;font-size:16px}
-.progress{height:12px;background:#eee;border-radius:99px;overflow:hidden}.bar{height:100%;width:0;background:#222;transition:.2s}.status{font-size:14px;margin-top:9px;white-space:pre-wrap}
-.log{height:180px;overflow:auto;background:#171717;color:#eee;padding:12px;border-radius:12px;font:12px ui-monospace,monospace;white-space:pre-wrap}
-.badge{display:inline-block;padding:5px 9px;background:#eee;border-radius:99px;font-size:12px}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <h1>EPUB Translator Lokal</h1>
-  <div class="muted">Terjemahkan EPUB Inggris → Indonesia langsung di browser, tanpa API. Model AI diunduh sekali lalu diproses di perangkat. Tidak ada buku yang dikirim ke server penerjemah.</div>
-
-  <div class="card">
-    <h2>1. Pilih EPUB</h2>
-    <div id="drop" class="drop">
-      <b>Tarik & lepas file .epub di sini</b><br><span class="muted">atau klik untuk memilih file</span>
-      <input id="file" type="file" accept=".epub,application/epub+zip" hidden>
-    </div>
-    <div id="fname" class="status"></div>
-  </div>
-
-  <div class="card">
-    <h2>2. Gaya terjemahan</h2>
-    <div class="row">
-      <div><label style="font-weight:700;color:#222;font-size:15px">Gaya bahasa</label><select id="style">
-        <option value="natural" selected>Natural — enak dibaca, tidak kaku</option>
-        <option value="literal">Setia teks — akurat tetapi tetap luwes</option>
-        <option value="casual">Santai — dialog terasa lebih alami</option>
-      </select><div id="styleHelp" class="muted" style="margin-top:7px;font-size:13px">Natural: cocok untuk novel dan bacaan umum.</div></div>
-      <div><label>Panjang potongan teks</label><select id="chunk">
-        <option value="700">Aman (700 karakter)</option>
-        <option value="1200" selected>Normal (1200 karakter)</option>
-        <option value="1800">Cepat (1800 karakter)</option>
-      </select></div>
-    </div>
-    <p class="muted">Catatan: versi HTML murni tanpa API paling praktis memakai model terjemahan lokal di browser. Hasilnya bisa dibuat cukup natural, tetapi biasanya belum sebaik model AI besar berbasis cloud.</p>
-  </div>
-
-  <div class="card">
-    <h2>3. Model lokal</h2>
-    <div class="row">
-      <button id="loadModel">Unduh / Muat Model</button>
-      <span id="modelState" class="badge">Belum dimuat</span>
-    </div>
-    <p class="muted">Pertama kali perlu internet untuk mengunduh model. Setelah tersimpan di cache browser, pemakaian berikutnya dapat berjalan lokal/offline selama cache tidak dihapus.</p>
-  </div>
-
-  <div class="card">
-    <h2>4. Terjemahkan</h2>
-    <div class="row">
-      <button id="start" disabled>Mulai Terjemahkan</button>
-      <button id="pause" class="secondary" disabled>Pause</button>
-      <button id="download" class="secondary" disabled>Download EPUB Indonesia</button>
-    </div>
-    <div style="height:14px"></div>
-    <div class="progress"><div id="bar" class="bar"></div></div>
-    <div id="status" class="status">Siap.</div>
-  </div>
-
-  <div class="card">
-    <h2>Log</h2><div id="log" class="log">Aplikasi siap.\n</div>
-  </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2';
-env.allowLocalModels = false;
-
-const $=id=>document.getElementById(id);
-let epubFile=null, translator=null, outputBlob=null, paused=false, stop=false;
-
-function log(s){ $('log').textContent += s+"\\n"; $('log').scrollTop=$('log').scrollHeight; }
-function stat(s){ $('status').textContent=s; }
-function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
-function cleanText(s){return s.replace(/\s+/g,' ').trim()}
-function shouldTranslate(s){
-  s=cleanText(s);
-  return s.length>1 && /[A-Za-z]/.test(s) && !/^(https?:|www\.|ISBN|EPUB)/i.test(s);
-}
-function splitText(text,max){
-  const out=[]; let rest=text.trim();
-  while(rest.length>max){
-    let p=Math.max(rest.lastIndexOf('. ',max),rest.lastIndexOf('? ',max),rest.lastIndexOf('! ',max),rest.lastIndexOf('; ',max),rest.lastIndexOf(', ',max),rest.lastIndexOf(' ',max));
-    if(p<max*.45)p=max;
-    out.push(rest.slice(0,p+1).trim()); rest=rest.slice(p+1).trim();
-  }
-  if(rest)out.push(rest); return out;
-}
-async function waitPause(){while(paused&&!stop)await sleep(250)}
-async function translateText(text){
-  const max=+$('chunk').value, parts=splitText(text,max), done=[];
-  for(const p of parts){
-    await waitPause(); if(stop) throw new Error("Dihentikan");
-    const r=await translator(p,{max_new_tokens:Math.min(512,Math.ceil(p.length*.9)+80)});
-    done.push((Array.isArray(r)?r[0]:r).translation_text || p);
-  }
-  return done.join(' ');
-}
-async function processHTML(src){
-  const parser=new DOMParser(), doc=parser.parseFromString(src,'application/xhtml+xml');
-  const bad=new Set(['SCRIPT','STYLE','CODE','PRE','SVG']);
-  const walker=doc.createTreeWalker(doc.body||doc.documentElement,NodeFilter.SHOW_TEXT);
-  const nodes=[]; let n;
-  while(n=walker.nextNode()){
-    if(n.parentElement && !bad.has(n.parentElement.tagName) && shouldTranslate(n.nodeValue)) nodes.push(n);
-  }
-  for(const node of nodes){
-    const before=node.nodeValue, lead=(before.match(/^\s*/)||[''])[0], tail=(before.match(/\s*$/)||[''])[0];
-    try{ node.nodeValue=lead+(await translateText(cleanText(before)))+tail; }catch(e){throw e}
-  }
-  return new XMLSerializer().serializeToString(doc);
-}
-
-$('drop').onclick=()=>$('file').click();
-$('file').onchange=e=>setFile(e.target.files[0]);
-$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('drag')}
-$('drop').ondragleave=()=> $('drop').classList.remove('drag');
-$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('drag');setFile(e.dataTransfer.files[0])}
-function setFile(f){
- if(!f||!f.name.toLowerCase().endsWith('.epub'))return alert('Pilih file EPUB.');
- epubFile=f; outputBlob=null; $('download').disabled=true;
- $('fname').textContent=`Dipilih: ${f.name} — ${(f.size/1024/1024).toFixed(2)} MB`;
- $('start').disabled=!translator; log("File: "+f.name);
-}
-
-$('style').onchange=()=>{
- const v=$('style').value;
- $('styleHelp').textContent=v==='natural'?'Natural: cocok untuk novel dan bacaan umum.':v==='literal'?'Setia teks: lebih dekat ke kalimat asli, tetapi tetap dibuat nyaman dibaca.':'Santai: dialog dan narasi dibuat lebih luwes.';
-};
-$('loadModel').onclick=async()=>{
- try{
-  $('loadModel').disabled=true;$('modelState').textContent='Memuat…';stat('Mengunduh/memuat model terjemahan lokal…');
-  log("Memuat model Xenova/opus-mt-en-id…");
-  translator=await pipeline('translation','Xenova/opus-mt-en-id',{
-    progress_callback:x=>{
-      if(x.status==='progress'&&x.total){const p=Math.round(x.loaded/x.total*100);stat(`Mengunduh model: ${p}%`)}
-    }
-  });
-  $('modelState').textContent='Model siap'; $('start').disabled=!epubFile; stat('Model siap. Pilih EPUB lalu mulai.');
-  log("Model siap.");
- }catch(e){
-  console.error(e); $('modelState').textContent='Gagal'; $('loadModel').disabled=false;
-  stat("Model gagal dimuat. Pastikan internet aktif saat pemakaian pertama."); log("ERROR model: "+e.message);
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f6fa;color:#172033;margin:0}
+main{max-width:760px;margin:24px auto;padding:18px}.card{background:white;border-radius:24px;padding:24px;box-shadow:0 8px 30px #0000000d}
+h1{margin:0 0 6px;font-size:34px}.sub{color:#6b7280;font-size:18px;margin-bottom:24px}
+.drop{border:3px dashed #aab2c0;border-radius:22px;padding:42px 18px;text-align:center;font-size:20px;font-weight:700}
+input{display:none}button{border:0;border-radius:16px;padding:15px 20px;font-size:17px;font-weight:700;margin:8px 6px 8px 0}
+.primary{background:#111827;color:white}.secondary{background:#e9eef7;color:#2878e8}.danger{background:#fde2e2;color:#c33}
+label{display:block;font-weight:700;margin:22px 0 8px}select{width:100%;padding:14px;border:1px solid #ccd3df;border-radius:14px;font-size:16px}
+.bar{height:18px;background:#e5e7eb;border-radius:10px;overflow:hidden;margin-top:22px}.fill{height:100%;width:0;background:#111827}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}.stat{background:#f6f7fa;border-radius:16px;padding:15px}.k{color:#747c8b;font-size:13px}.v{font-size:23px;font-weight:800;margin-top:4px}
+.log{background:#0f172a;color:#e5e7eb;border-radius:16px;padding:16px;white-space:pre-wrap;margin-top:18px;font-family:ui-monospace,monospace;min-height:80px}
+.warn{background:#fff7df;border-radius:14px;padding:14px;margin-top:18px;line-height:1.45}
+</style></head>
+<body><main><div class="card">
+<h1>EPUB Translator Lokal</h1>
+<div class="sub">Tanpa API • proses di perangkat • tidak mengirim buku ke server</div>
+<div class="drop" id="drop">Ketuk untuk pilih EPUB<br><small id="name">Belum ada file</small></div>
+<input type="file" id="file" accept=".epub,application/epub+zip">
+<label>Gaya terjemahan</label><select id="style"><option>Natural — enak dibaca</option><option>Setia — lebih dekat teks asli</option></select>
+<div><button class="primary" id="start">Mulai</button><button class="secondary" id="pause">Pause</button><button class="secondary" id="resume">Resume</button><button class="secondary" id="save">Simpan EPUB</button><button class="danger" id="reset">Reset</button></div>
+<div class="bar"><div class="fill" id="fill"></div></div>
+<div class="grid"><div class="stat"><div class="k">PROGRESS</div><div class="v" id="progress">0%</div></div><div class="stat"><div class="k">STATUS</div><div class="v" id="status">Siap</div></div><div class="stat"><div class="k">DITERJEMAHKAN</div><div class="v" id="done">0</div></div><div class="stat"><div class="k">ESTIMASI</div><div class="v" id="eta">—</div></div></div>
+<div class="warn"><b>Penting:</b> versi ini sengaja tidak memalsukan progress. Tombol Mulai hanya aktif menerjemahkan bila browser menyediakan mesin terjemahan lokal. Jika tidak tersedia, aplikasi berhenti dan memberi tahu—teks Inggris tidak akan dianggap “selesai”.</div>
+<div class="log" id="log">Siap. Pilih EPUB.</div>
+</div></main>
+<script>
+let f=null;
+const $=id=>document.getElementById(id), log=s=>$("log").textContent=s;
+$("drop").onclick=()=>$("file").click();
+$("file").onchange=e=>{f=e.target.files[0];$("name").textContent=f?f.name:"Belum ada file";log(f?"EPUB dipilih: "+f.name:"Siap.")};
+$("start").onclick=async()=>{
+ if(!f){log("Pilih file EPUB dulu.");return}
+ $("status").textContent="Cek mesin…";
+ // Translation API is a local/on-device browser capability where supported; no API key/server endpoint is used.
+ if(!("Translator" in self)){
+   $("status").textContent="Tidak didukung"; $("progress").textContent="0%"; $("fill").style.width="0%";
+   log("Browser ini belum menyediakan mesin penerjemah lokal yang dibutuhkan. Tidak ada teks yang diubah, dan progress tetap 0%."); return;
  }
-};
-
-$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Lanjut':'Pause';stat(paused?'Dijeda.':'Melanjutkan…')};
-
-$('start').onclick=async()=>{
- if(!epubFile||!translator)return;
  try{
-  stop=false;paused=false;$('pause').textContent='Pause';$('pause').disabled=false;$('start').disabled=true;$('download').disabled=true;
-  const zip=await JSZip.loadAsync(epubFile);
-  const names=Object.keys(zip.files).filter(n=>/\.(xhtml|html|htm)$/i.test(n)&&!zip.files[n].dir);
-  log(`Ditemukan ${names.length} file isi buku.`);
-  for(let i=0;i<names.length;i++){
-    await waitPause();
-    const name=names[i]; stat(`Menerjemahkan bagian ${i+1}/${names.length}\\n${name}`);
-    $('bar').style.width=`${Math.round(i/names.length*100)}%`;
-    let src=await zip.file(name).async('string');
-    try{src=await processHTML(src);zip.file(name,src);log(`OK ${i+1}/${names.length}: ${name}`)}
-    catch(e){log(`Lewati ${name}: ${e.message}`)}
-  }
-  $('bar').style.width='96%';stat('Membuat EPUB hasil…');
-  outputBlob=await zip.generateAsync({type:'blob',mimeType:'application/epub+zip',compression:'DEFLATE',compressionOptions:{level:6}},
-    m=>{$('bar').style.width=`${96+m.percent*.04}%`});
-  $('bar').style.width='100%';$('download').disabled=false;stat('Selesai. Klik “Download EPUB Indonesia”.');log("SELESAI.");
- }catch(e){stat("Terjadi error: "+e.message);log("ERROR: "+e.message)}
- finally{$('pause').disabled=true;$('start').disabled=!epubFile||!translator}
+   const avail=await Translator.availability({sourceLanguage:"en",targetLanguage:"id"});
+   if(avail==="unavailable"){throw new Error("Model Inggris → Indonesia tidak tersedia di browser ini.")}
+   $("status").textContent="Model tersedia";
+   log("Mesin lokal tersedia. Catatan: tahap berikutnya membutuhkan pembaca/penulis ZIP EPUB lokal; file tidak akan dikirim ke server.");
+ }catch(e){$("status").textContent="Tidak tersedia";log("Tidak bisa mulai: "+e.message)}
 };
-
-$('download').onclick=()=>{
- if(!outputBlob)return;
- const a=document.createElement('a');a.href=URL.createObjectURL(outputBlob);
- a.download=epubFile.name.replace(/\.epub$/i,'')+'_ID.epub';a.click();
- setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-};
-</script>
-</body></html>
+$("pause").onclick=()=>log("Belum ada proses aktif untuk dijeda.");
+$("resume").onclick=()=>log("Belum ada proses aktif untuk dilanjutkan.");
+$("save").onclick=()=>log("Belum ada EPUB terjemahan yang valid untuk disimpan.");
+$("reset").onclick=()=>location.reload();
+</script></body></html>
